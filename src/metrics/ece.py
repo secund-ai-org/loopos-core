@@ -1,10 +1,10 @@
-"""Expected Calibration Error metric implementation."""
+"""Expected Calibration Error metric implementation (Pydantic V1 Compatible)."""
 from __future__ import annotations
 
 from typing import Iterable, Sequence
 
 import numpy as np
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, validator, root_validator
 
 
 class CalibrationInput(BaseModel):
@@ -14,8 +14,7 @@ class CalibrationInput(BaseModel):
     labels: Sequence[int]
     n_bins: int = Field(default=10, ge=1, description="Number of bins for calibration.")
 
-    @field_validator("probabilities")
-    @classmethod
+    @validator("probabilities", pre=False)
     def validate_probabilities(cls, values: Sequence[float]) -> Sequence[float]:
         if not values:
             raise ValueError("At least one probability is required.")
@@ -24,8 +23,7 @@ class CalibrationInput(BaseModel):
                 raise ValueError("Probabilities must be between 0 and 1.")
         return values
 
-    @field_validator("labels")
-    @classmethod
+    @validator("labels", pre=False)
     def validate_labels(cls, values: Sequence[int]) -> Sequence[int]:
         if not values:
             raise ValueError("At least one label is required.")
@@ -34,11 +32,15 @@ class CalibrationInput(BaseModel):
                 raise ValueError("Labels must be 0 or 1 for ECE computation.")
         return values
 
-    @model_validator(mode='after')
-    def validate_lengths(self) -> 'CalibrationInput':
-        if len(self.probabilities) != len(self.labels):
-            raise ValueError("Probabilities and labels must have the same length.")
-        return self
+    @root_validator
+    def validate_lengths(cls, values: dict) -> dict:
+        probabilities = values.get("probabilities")
+        labels = values.get("labels")
+        # Check if both exist before comparing length to avoid confusing errors
+        if probabilities is not None and labels is not None:
+            if len(probabilities) != len(labels):
+                raise ValueError("Probabilities and labels must have the same length.")
+        return values
 
 
 def expected_calibration_error(
@@ -46,7 +48,6 @@ def expected_calibration_error(
 ) -> float:
     """Compute Expected Calibration Error (ECE)."""
 
-    # Validate inputs using Pydantic V2
     data = CalibrationInput(probabilities=probabilities, labels=labels, n_bins=n_bins)
 
     prob_array = np.asarray(data.probabilities, dtype=float)
@@ -77,7 +78,6 @@ def expected_calibration_error(
 
 def batch_ece(records: Iterable[CalibrationInput]) -> float:
     """Compute the mean ECE across multiple calibration batches."""
-    # Note: inputs here are already validated objects
     ece_values = [
         expected_calibration_error(r.probabilities, r.labels, r.n_bins) 
         for r in records
